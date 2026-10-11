@@ -26,7 +26,8 @@ show_all_zones = input.bool(true, "Show All Sessions & KZ", group=grp_master, to
 // --- GENERAL ---
 grp_gen = "General Settings"
 lookback_days = input.int(10, "Lookback History (Days)", minval=1, maxval=200, group=grp_gen)
-tz_input = input.string("Europe/Istanbul", "Timezone", options=["Europe/Istanbul", "America/New_York", "UTC", "Europe/London", "Asia/Tokyo"], group=grp_gen)
+tz_input = input.string("America/New_York", "Session Timezone", options=["America/New_York", "Europe/London", "Europe/Istanbul", "UTC", "Asia/Tokyo"], group=grp_gen,
+                         tooltip="Timezone the session times below are read in. The defaults are New York times, so keep America/New_York unless you re-enter the times in your own timezone. New York follows daylight saving, so sessions stay aligned all year.")
 
 // --- ASIA SETTINGS ---
 grp_asia = "1. ASIA Market"
@@ -63,6 +64,8 @@ t_pm_kz      = input.session("1530-1800", "Time", group=grp_pm, inline="pm2")
 // --- KEY LEVELS ---
 grp_lvl = "5. Key Levels (Smart Merging)"
 show_levels = input.bool(true, "Show Levels", group=grp_lvl)
+merge_atr   = input.float(0.1, "Merge Tolerance (x ATR)", minval=0, step=0.05, group=grp_lvl,
+                          tooltip="Levels closer than this many ATR(14) are drawn as one line with a combined label, so labels do not overlap. 0 = merge identical prices only.")
 lbl_offset  = input.int(15, "Label Offset", group=grp_lvl)
 txt_size_in = input.string("Normal", "Text Size", options=["Tiny", "Small", "Normal", "Large"], group=grp_lvl)
 lbl_size    = txt_size_in == "Tiny" ? size.tiny : txt_size_in == "Small" ? size.small : txt_size_in == "Normal" ? size.normal : size.large
@@ -83,6 +86,14 @@ grp_gap = "6. Price Gaps"
 show_gaps = input.bool(true, "Show Gaps", group=grp_gap)
 c_gap_up   = input.color(color.new(#00bfa5, 60), "Bull Gap", group=grp_gap)
 c_gap_down = input.color(color.new(#ff5252, 60), "Bear Gap", group=grp_gap)
+max_gaps   = input.int(50, "Max Active Gaps", minval=1, maxval=200, group=grp_gap,
+                       tooltip="Oldest unfilled gaps are removed beyond this count. Keeps the chart readable and the script fast on low timeframes.")
+
+// --- ALERTS ---
+grp_alert = "7. Alerts"
+alert_levels = input.bool(true, "Price crosses a key level", group=grp_alert)
+alert_gaps   = input.bool(false, "New gap formed", group=grp_alert,
+                          tooltip="Create one alert with the condition \"Any alert() function call\" to receive every alert enabled here.")
 
 // =============================================================================
 // 3. DATA FETCHING
@@ -94,6 +105,7 @@ c_gap_down = input.color(color.new(#ff5252, 60), "Bear Gap", group=grp_gap)
 [pwo_p, pwo_t] = request.security(syminfo.tickerid, "W", [open[1], time[1]], lookahead=barmerge.lookahead_on)
 
 start_time_limit = timenow - (lookback_days * 24 * 60 * 60 * 1000)
+atr14 = ta.atr(14)
 
 // =============================================================================
 // 4. DUAL-LAYER SESSION LOGIC
@@ -153,10 +165,10 @@ var array<label> a_labels = array.new<label>()
 
 method add_or_merge(LevelData[] levels, float p, string n, color c, int t) =>
     bool found = false
-    float epsilon = syminfo.mintick * 0.5
+    float tol = math.max(syminfo.mintick * 0.5, nz(atr14) * merge_atr)
 
     for lvl in levels
-        if math.abs(lvl.price - p) < epsilon
+        if math.abs(lvl.price - p) <= tol
             lvl.name := lvl.name + " / " + n
             lvl.start_time := math.min(lvl.start_time, t)
             found := true
@@ -203,6 +215,10 @@ f_draw_levels() =>
                        size=lbl_size, textalign=text.align_left)
         array.push(a_labels, lb)
 
+        crossed = (close[1] < lvl.price and close >= lvl.price) or (close[1] > lvl.price and close <= lvl.price)
+        if alert_levels and barstate.isrealtime and crossed
+            alert(syminfo.ticker + ": price crossed " + lvl.name + " @ " + str.tostring(lvl.price, format.mintick), alert.freq_once_per_bar)
+
 if barstate.islast and show_levels
     f_draw_levels()
 
@@ -219,11 +235,20 @@ if show_gaps and time > start_time_limit
         new_box = box.new(left=time[1], top=low, right=time, bottom=high[1],
                           xloc=xloc.bar_time, bgcolor=c_gap_up, border_color=na)
         array.push(active_gaps, GapData.new(new_box, high[1], true))
+        if alert_gaps
+            alert(syminfo.ticker + ": new bullish gap " + str.tostring(high[1], format.mintick) + " - " + str.tostring(low, format.mintick), alert.freq_once_per_bar_close)
 
     if is_bear_gap
         new_box = box.new(left=time[1], top=low[1], right=time, bottom=high,
                           xloc=xloc.bar_time, bgcolor=c_gap_down, border_color=na)
         array.push(active_gaps, GapData.new(new_box, low[1], false))
+        if alert_gaps
+            alert(syminfo.ticker + ": new bearish gap " + str.tostring(high, format.mintick) + " - " + str.tostring(low[1], format.mintick), alert.freq_once_per_bar_close)
+
+    // Drop the oldest gaps beyond the cap so the array (and the loop below) stays bounded
+    while array.size(active_gaps) > max_gaps
+        old_gap = array.shift(active_gaps)
+        box.delete(old_gap.id)
 
     if array.size(active_gaps) > 0
         for i = array.size(active_gaps) - 1 to 0
