@@ -1,0 +1,41 @@
+Key Levels, Gaps & Kill Zones puts the reference points most intraday traders mark by hand every morning on one chart, and keeps them updated as the day unfolds.
+
+WHAT IT SHOWS
+
+Sessions and kill zones
+Asia, London, NY AM and NY PM sessions are drawn as dotted boxes, and their kill zones as solid boxes. Times are read in New York time by default, so they stay aligned through daylight-saving changes. Every session can be toggled, re-timed and recoloured, and one master switch hides all of them at once.
+
+Session liquidity
+When a session closes, its high and low extend to the right. Once price trades through one, the line stops at that bar and is marked with a check, or removed if you prefer. This shows at a glance which session extremes are still untouched.
+
+Key levels
+Yearly, monthly, previous-monthly, weekly, previous-weekly and daily opens, the New York midnight open, and the previous day and week highs and lows. Levels that sit within a small ATR-based distance of each other are merged into a single line with a combined label (for example "WO / PDH") so labels do not stack on top of each other. A level is hidden when it carries no information on the current timeframe, such as the daily open on a daily chart.
+
+Gaps
+Choose 3-candle fair value gaps, classic 2-candle price gaps, or both. Gaps shrink as price partially fills them, show their midpoint, and disappear once fully filled. A minimum size filter (in ATR) hides small ones.
+
+Opening gaps
+New Week Opening Gap (NWOG) and New Day Opening Gap (NDOG) with their midpoint, keeping only the most recent ones.
+
+Dashboard
+Active session and kill zone, the 5-day average daily range, how much of it today has already covered, and the nearest key level above and below price with its distance.
+
+HOW TO USE IT
+
+1. Add the indicator and check that the Session Timezone matches the times you entered. The defaults are New York times.
+2. Turn off the modules you do not use. Each one has its own group in the settings.
+3. For alerts, create one alert on the indicator with the condition "Any alert() function call". Then choose which events fire in the Alerts group: key level cross, session high/low swept, new gap, kill zone open.
+
+HOW IT WORKS
+
+Higher-timeframe opens are requested from the current higher-timeframe bar, whose open is fixed from its first tick. Previous highs, lows and the average range are requested from completed bars only. Session highs and lows are built bar by bar from the chart. None of the drawn levels change after the fact when the chart is reloaded.
+
+Gaps, session levels and opening gaps are kept in capped lists. The oldest are dropped first, which keeps the chart readable and the script responsive on low timeframes.
+
+LIMITATIONS
+
+Session boxes, the midnight open, daily levels and opening gaps need an intraday chart. Price gaps between two candles are rare on markets that trade around the clock; use the fair value gap mode there. The levels are reference points, not signals. They describe where price has been, not where it will go.
+
+WHAT'S NEW IN v2.0
+
+Session high/low liquidity with sweep detection, daily open, midnight open, previous day and week high/low, fair value gaps with partial fill and midpoint, NWOG/NDOG, dashboard, and alerts. v1.1 fixed the session timezone, which was drawing sessions about seven hours early.

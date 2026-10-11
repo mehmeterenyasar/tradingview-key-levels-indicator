@@ -536,5 +536,5 @@ if barstate.islast
         f_draw_levels(levels)
     if show_dash
         f_draw_dash(levels)
-    if alert_levels and barstate.isrealtime
+    if alert_levels
         f_level_alerts(levels)
