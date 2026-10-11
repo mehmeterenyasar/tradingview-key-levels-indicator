@@ -1,19 +1,50 @@
 //@version=6
-indicator("arnoldd's key levels, gaps, KZ's", overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+indicator("arnoldd's key levels, gaps, KZ's", shorttitle="arnoldd KL", overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
 
 // =============================================================================
 // 1. DATA TYPES
 // =============================================================================
 type LevelData
-    float price
+    float  price
     string name
-    color col
-    int start_time
+    color  col
+    int    start_time
+    string style
+
+// One trading session or kill zone, tracked across bars
+type Session
+    string name
+    color  col
+    bool   is_kz
+    box    bx
+    float  h
+    float  l
+    int    ht
+    int    lt
+    bool   in_zone = false
+    bool   started = false
+    bool   ended   = false
+
+// Session high/low left open until price trades through it
+type LiqLevel
+    line   ln
+    label  lb
+    float  price
+    bool   is_high
+    string name
+    color  col
 
 type GapData
-    box id
-    float level_to_fill
-    bool is_bull
+    box   bx
+    line  ce
+    float top
+    float bottom
+    bool  is_bull
+
+type OpenGap
+    box  bx
+    line ce
 
 // =============================================================================
 // 2. SETTINGS
@@ -61,109 +92,244 @@ t_pm_sess    = input.session("1330-2000", "Time", group=grp_pm, inline="pm1")
 show_pm_kz   = input.bool(true, "Show Kill Zone", group=grp_pm, inline="pm2")
 t_pm_kz      = input.session("1530-1800", "Time", group=grp_pm, inline="pm2")
 
+// --- SESSION LIQUIDITY ---
+grp_liq = "5. Session Liquidity (Highs / Lows)"
+show_liq = input.bool(true, "Show Session Highs / Lows", group=grp_liq,
+                      tooltip="When a full session closes, its high and low extend to the right until price trades through them (swept). Works even if the session box itself is hidden.")
+liq_asia = input.bool(true, "Asia", group=grp_liq, inline="lq")
+liq_lon  = input.bool(true, "London", group=grp_liq, inline="lq")
+liq_ny   = input.bool(true, "NY AM", group=grp_liq, inline="lq")
+liq_pm   = input.bool(false, "NY PM", group=grp_liq, inline="lq")
+liq_keep_swept = input.bool(true, "Keep Swept Levels (dimmed)", group=grp_liq)
+max_liq        = input.int(20, "Max Unswept Levels", minval=2, maxval=100, group=grp_liq)
+
 // --- KEY LEVELS ---
-grp_lvl = "5. Key Levels (Smart Merging)"
+grp_lvl = "6. Key Levels (Smart Merging)"
 show_levels = input.bool(true, "Show Levels", group=grp_lvl)
 merge_atr   = input.float(0.1, "Merge Tolerance (x ATR)", minval=0, step=0.05, group=grp_lvl,
                           tooltip="Levels closer than this many ATR(14) are drawn as one line with a combined label, so labels do not overlap. 0 = merge identical prices only.")
+show_price  = input.bool(false, "Show Price in Label", group=grp_lvl)
 lbl_offset  = input.int(15, "Label Offset", group=grp_lvl)
 txt_size_in = input.string("Normal", "Text Size", options=["Tiny", "Small", "Normal", "Large"], group=grp_lvl)
 lbl_size    = txt_size_in == "Tiny" ? size.tiny : txt_size_in == "Small" ? size.small : txt_size_in == "Normal" ? size.normal : size.large
 
-show_yo  = input.bool(true, "Yearly Open (YO)", group=grp_lvl)
-c_yo     = input.color(color.new(#ffffff, 0), "YO Color", group=grp_lvl)
-show_mo  = input.bool(true, "Monthly Open (MO)", group=grp_lvl)
-c_mo     = input.color(color.new(#b2b5be, 0), "MO Color", group=grp_lvl)
-show_pmo = input.bool(true, "Prev. Monthly Open (PMO)", group=grp_lvl)
-c_pmo    = input.color(color.new(#5d606b, 0), "PMO Color", group=grp_lvl)
-show_wo  = input.bool(true, "Weekly Open (WO)", group=grp_lvl)
-c_wo     = input.color(color.new(#e0e0e0, 0), "WO Color", group=grp_lvl)
-show_pwo = input.bool(true, "Prev. Weekly Open (PWO)", group=grp_lvl)
-c_pwo    = input.color(color.new(#787b86, 0), "PWO Color", group=grp_lvl)
+show_yo  = input.bool(true, "Yearly Open (YO)", group=grp_lvl, inline="yo")
+c_yo     = input.color(color.new(#ffffff, 0), "", group=grp_lvl, inline="yo")
+show_mo  = input.bool(true, "Monthly Open (MO)", group=grp_lvl, inline="mo")
+c_mo     = input.color(color.new(#b2b5be, 0), "", group=grp_lvl, inline="mo")
+show_pmo = input.bool(true, "Prev. Monthly Open (PMO)", group=grp_lvl, inline="pmo")
+c_pmo    = input.color(color.new(#5d606b, 0), "", group=grp_lvl, inline="pmo")
+show_wo  = input.bool(true, "Weekly Open (WO)", group=grp_lvl, inline="wo")
+c_wo     = input.color(color.new(#e0e0e0, 0), "", group=grp_lvl, inline="wo")
+show_pwo = input.bool(true, "Prev. Weekly Open (PWO)", group=grp_lvl, inline="pwo")
+c_pwo    = input.color(color.new(#787b86, 0), "", group=grp_lvl, inline="pwo")
+show_do  = input.bool(true, "Daily Open (DO)", group=grp_lvl, inline="do")
+c_do     = input.color(color.new(#26c6da, 0), "", group=grp_lvl, inline="do")
+show_mno = input.bool(true, "NY Midnight Open (MNO)", group=grp_lvl, inline="mno",
+                      tooltip="Open of the first bar at or after 00:00 New York time. Intraday charts only.")
+c_mno    = input.color(color.new(#ab47bc, 0), "", group=grp_lvl, inline="mno")
+show_pd  = input.bool(true, "Prev. Day High / Low (PDH / PDL)", group=grp_lvl, inline="pd")
+c_pd     = input.color(color.new(#4db6ac, 0), "", group=grp_lvl, inline="pd")
+show_pw  = input.bool(false, "Prev. Week High / Low (PWH / PWL)", group=grp_lvl, inline="pw")
+c_pw     = input.color(color.new(#9575cd, 0), "", group=grp_lvl, inline="pw")
 
 // --- GAPS ---
-grp_gap = "6. Price Gaps"
-show_gaps = input.bool(true, "Show Gaps", group=grp_gap)
-c_gap_up   = input.color(color.new(#00bfa5, 60), "Bull Gap", group=grp_gap)
-c_gap_down = input.color(color.new(#ff5252, 60), "Bear Gap", group=grp_gap)
-max_gaps   = input.int(50, "Max Active Gaps", minval=1, maxval=200, group=grp_gap,
-                       tooltip="Oldest unfilled gaps are removed beyond this count. Keeps the chart readable and the script fast on low timeframes.")
+grp_gap = "7. Price Gaps / FVG"
+show_gaps   = input.bool(true, "Show Gaps", group=grp_gap)
+gap_mode    = input.string("FVG (3-candle)", "Gap Type", options=["FVG (3-candle)", "Price Gap (2-candle)", "Both"], group=grp_gap,
+                           tooltip="FVG: low of candle 3 above high of candle 1 (bullish), or the reverse. Price Gap: a true gap between two consecutive candles, common on stocks and futures, rare on 24/7 markets.")
+min_gap_atr = input.float(0.0, "Min Size (x ATR)", minval=0, step=0.05, group=grp_gap,
+                          tooltip="Ignore gaps smaller than this many ATR(14). 0 = show all.")
+shrink_gaps = input.bool(true, "Shrink on Partial Fill", group=grp_gap)
+show_ce     = input.bool(true, "Show Midpoint (CE)", group=grp_gap)
+c_gap_up    = input.color(color.new(#00bfa5, 60), "Bull Gap", group=grp_gap, inline="gc")
+c_gap_down  = input.color(color.new(#ff5252, 60), "Bear Gap", group=grp_gap, inline="gc")
+max_gaps    = input.int(50, "Max Active Gaps", minval=1, maxval=200, group=grp_gap,
+                         tooltip="Oldest unfilled gaps are removed beyond this count. Keeps the chart readable and the script fast on low timeframes.")
+
+// --- OPENING GAPS ---
+grp_og = "8. Opening Gaps (NWOG / NDOG)"
+show_nwog  = input.bool(true, "New Week Opening Gap (NWOG)", group=grp_og, inline="nw",
+                         tooltip="Gap between the last close of the week and the first open of the new week. Extends right with its midpoint (CE). Intraday charts only.")
+c_nwog     = input.color(color.new(#ffd54f, 0), "", group=grp_og, inline="nw")
+nwog_count = input.int(3, "Keep Last", minval=1, maxval=10, group=grp_og, inline="nw2")
+show_ndog  = input.bool(false, "New Day Opening Gap (NDOG)", group=grp_og, inline="nd",
+                         tooltip="Gap between the previous session close and the new session open. Mostly relevant for futures and stocks.")
+c_ndog     = input.color(color.new(#90a4ae, 0), "", group=grp_og, inline="nd")
+ndog_count = input.int(3, "Keep Last", minval=1, maxval=10, group=grp_og, inline="nd2")
+
+// --- DASHBOARD ---
+grp_dash = "9. Dashboard"
+show_dash = input.bool(true, "Show Dashboard", group=grp_dash)
+dash_pos_in = input.string("Top Right", "Position", options=["Top Right", "Bottom Right", "Top Left", "Bottom Left"], group=grp_dash)
+dash_pos = dash_pos_in == "Top Right" ? position.top_right : dash_pos_in == "Bottom Right" ? position.bottom_right : dash_pos_in == "Top Left" ? position.top_left : position.bottom_left
 
 // --- ALERTS ---
-grp_alert = "7. Alerts"
+grp_alert = "10. Alerts"
 alert_levels = input.bool(true, "Price crosses a key level", group=grp_alert)
-alert_gaps   = input.bool(false, "New gap formed", group=grp_alert,
+alert_sweep  = input.bool(true, "Session high / low swept", group=grp_alert)
+alert_gaps   = input.bool(false, "New gap / FVG formed", group=grp_alert)
+alert_kz     = input.bool(false, "Kill zone opens", group=grp_alert,
                           tooltip="Create one alert with the condition \"Any alert() function call\" to receive every alert enabled here.")
 
 // =============================================================================
 // 3. DATA FETCHING
 // =============================================================================
+// Opens use lookahead_on without an offset: the open of the current higher-timeframe
+// bar is known from its first tick, so it cannot leak future data. Highs and lows
+// use [1] so they only ever read completed bars.
 [yo_p, yo_t]   = request.security(syminfo.tickerid, "12M", [open, time], lookahead=barmerge.lookahead_on)
 [mo_p, mo_t]   = request.security(syminfo.tickerid, "M", [open, time], lookahead=barmerge.lookahead_on)
 [pmo_p, pmo_t] = request.security(syminfo.tickerid, "M", [open[1], time[1]], lookahead=barmerge.lookahead_on)
 [wo_p, wo_t]   = request.security(syminfo.tickerid, "W", [open, time], lookahead=barmerge.lookahead_on)
-[pwo_p, pwo_t] = request.security(syminfo.tickerid, "W", [open[1], time[1]], lookahead=barmerge.lookahead_on)
+[pwo_p, pwo_t, pwh_p, pwl_p] = request.security(syminfo.tickerid, "W", [open[1], time[1], high[1], low[1]], lookahead=barmerge.lookahead_on)
+[do_p, do_t]   = request.security(syminfo.tickerid, "D", [open, time], lookahead=barmerge.lookahead_on)
+[pd_t, pdh_p, pdl_p, adr5] = request.security(syminfo.tickerid, "D", [time[1], high[1], low[1], ta.sma(high - low, 5)[1]], lookahead=barmerge.lookahead_on)
 
 start_time_limit = timenow - (lookback_days * 24 * 60 * 60 * 1000)
 atr14 = ta.atr(14)
 
+is_intraday = timeframe.isintraday
+tf_sec      = timeframe.in_seconds()
+below_week  = tf_sec < timeframe.in_seconds("W")
+below_month = tf_sec < timeframe.in_seconds("M")
+new_day     = timeframe.change("D")
+new_week    = timeframe.change("W")
+
+// NY midnight open
+ny_new_day = dayofmonth(time, "America/New_York") != dayofmonth(time[1], "America/New_York")
+var float mno_p = na
+var int   mno_t = na
+if is_intraday and ny_new_day
+    mno_p := open
+    mno_t := time
+
+// Running range of the current day, for the dashboard
+var float day_hi = na
+var float day_lo = na
+if new_day
+    day_hi := high
+    day_lo := low
+else
+    day_hi := math.max(nz(day_hi, high), high)
+    day_lo := math.min(nz(day_lo, low), low)
+
 // =============================================================================
-// 4. DUAL-LAYER SESSION LOGIC
+// 4. SESSIONS & KILL ZONES
 // =============================================================================
 
-f_draw_box(time_str, is_enabled, base_col, is_kz, name_txt) =>
-    // Master Switch Check: If 'show_all_zones' is false, force disable everything
-    active_status = is_enabled and show_all_zones
+method update(Session s, string sess, bool draw_on) =>
+    bool now_in = is_intraday and not na(time(timeframe.period, sess + ":1234567", tz_input))
+    s.started := now_in and not s.in_zone
+    s.ended   := s.in_zone and not now_in
+    s.in_zone := now_in
 
-    in_zone = not na(time(timeframe.period, time_str + ":1234567", tz_input))
-
-    border_st = is_kz ? line.style_solid : line.style_dotted
-    bg_transp = is_kz ? 85 : 95
-    box_col   = color.new(base_col, bg_transp)
-    brd_col   = is_kz ? color.new(base_col, 50) : color.new(base_col, 80)
-
-    var box b = na
-    var float h = na
-    var float l = na
-
-    if active_status and time > start_time_limit
-        if in_zone
-            if not in_zone[1]
-                h := high
-                l := low
-                b := box.new(left=time, top=h, right=time, bottom=l, xloc=xloc.bar_time,
-                             bgcolor=box_col, border_color=brd_col, border_style=border_st,
-                             text=name_txt, text_color=color.new(base_col, 30), text_size=size.tiny,
+    if s.started
+        s.h  := high
+        s.l  := low
+        s.ht := time
+        s.lt := time
+        s.bx := na
+        if draw_on and show_all_zones and time > start_time_limit
+            s.bx := box.new(left=time, top=high, right=time, bottom=low, xloc=xloc.bar_time,
+                             bgcolor=color.new(s.col, s.is_kz ? 85 : 95),
+                             border_color=color.new(s.col, s.is_kz ? 50 : 80),
+                             border_style=s.is_kz ? line.style_solid : line.style_dotted,
+                             text=s.name, text_color=color.new(s.col, 30), text_size=size.tiny,
                              text_halign=text.align_left, text_valign=text.align_top)
-            else
-                h := math.max(h, high)
-                l := math.min(l, low)
-                if not na(b)
-                    box.set_top(b, h)
-                    box.set_bottom(b, l)
-                    box.set_right(b, time)
-        else
-            b := na
-    true
+    else if now_in
+        if high > s.h
+            s.h  := high
+            s.ht := time
+        if low < s.l
+            s.l  := low
+            s.lt := time
+        if not na(s.bx)
+            s.bx.set_top(s.h)
+            s.bx.set_bottom(s.l)
+            s.bx.set_right(time)
+    s
 
-// Draw calls (Controlled by Master Switch logic inside function)
-f_draw_box(t_asia_sess, show_asia_sess, c_asia, false, "ASIA")
-f_draw_box(t_asia_kz,   show_asia_kz,   c_asia, true,  "ASIA KZ")
-f_draw_box(t_lon_sess, show_lon_sess, c_lon, false, "LONDON")
-f_draw_box(t_lon_kz,   show_lon_kz,   c_lon, true,  "LON KZ")
-f_draw_box(t_ny_sess, show_ny_sess, c_ny, false, "NY AM")
-f_draw_box(t_ny_kz,   show_ny_kz,   c_ny, true,  "NY AM KZ")
-f_draw_box(t_pm_sess, show_pm_sess, c_pm, false, "NY PM")
-f_draw_box(t_pm_kz,   show_pm_kz,   c_pm, true,  "NY PM KZ")
+var Session s_asia    = Session.new(name="ASIA",     col=c_asia, is_kz=false)
+var Session s_asia_kz = Session.new(name="ASIA KZ",  col=c_asia, is_kz=true)
+var Session s_lon     = Session.new(name="LONDON",   col=c_lon,  is_kz=false)
+var Session s_lon_kz  = Session.new(name="LON KZ",   col=c_lon,  is_kz=true)
+var Session s_ny      = Session.new(name="NY AM",    col=c_ny,   is_kz=false)
+var Session s_ny_kz   = Session.new(name="NY AM KZ", col=c_ny,   is_kz=true)
+var Session s_pm      = Session.new(name="NY PM",    col=c_pm,   is_kz=false)
+var Session s_pm_kz   = Session.new(name="NY PM KZ", col=c_pm,   is_kz=true)
+
+s_asia.update(t_asia_sess, show_asia_sess)
+s_asia_kz.update(t_asia_kz, show_asia_kz)
+s_lon.update(t_lon_sess, show_lon_sess)
+s_lon_kz.update(t_lon_kz, show_lon_kz)
+s_ny.update(t_ny_sess, show_ny_sess)
+s_ny_kz.update(t_ny_kz, show_ny_kz)
+s_pm.update(t_pm_sess, show_pm_sess)
+s_pm_kz.update(t_pm_kz, show_pm_kz)
+
+method kz_alert(Session s) =>
+    if alert_kz and s.started
+        alert(syminfo.ticker + ": " + s.name + " opened", alert.freq_once_per_bar)
+
+s_asia_kz.kz_alert()
+s_lon_kz.kz_alert()
+s_ny_kz.kz_alert()
+s_pm_kz.kz_alert()
 
 // =============================================================================
-// 5. KEY LEVELS (IMPROVED MERGING)
+// 5. SESSION LIQUIDITY
+// =============================================================================
+
+var array<LiqLevel> liq_levels = array.new<LiqLevel>()
+
+f_add_liq(float p, int t, bool is_high, string name, color col) =>
+    ln = line.new(t, p, time, p, xloc=xloc.bar_time, extend=extend.right, color=color.new(col, 20), style=line.style_dashed)
+    lb = label.new(t, p, name, xloc=xloc.bar_time, style=is_high ? label.style_label_lower_left : label.style_label_upper_left,
+                   color=color.new(color.black, 100), textcolor=col, size=size.small)
+    liq_levels.push(LiqLevel.new(ln, lb, p, is_high, name, col))
+    while liq_levels.size() > max_liq
+        old = liq_levels.shift()
+        old.ln.delete()
+        old.lb.delete()
+
+method publish_liq(Session s, bool enabled) =>
+    if show_liq and enabled and s.ended and not na(s.h) and time > start_time_limit
+        f_add_liq(s.h, s.ht, true,  s.name + " H", s.col)
+        f_add_liq(s.l, s.lt, false, s.name + " L", s.col)
+
+s_asia.publish_liq(liq_asia)
+s_lon.publish_liq(liq_lon)
+s_ny.publish_liq(liq_ny)
+s_pm.publish_liq(liq_pm)
+
+if liq_levels.size() > 0
+    for i = liq_levels.size() - 1 to 0
+        lv = liq_levels.get(i)
+        swept = lv.is_high ? high > lv.price : low < lv.price
+        if swept
+            if alert_sweep
+                alert(syminfo.ticker + ": " + lv.name + " swept @ " + str.tostring(lv.price, format.mintick), alert.freq_once_per_bar)
+            if liq_keep_swept
+                lv.ln.set_extend(extend.none)
+                lv.ln.set_x2(time)
+                lv.ln.set_color(color.new(lv.col, 70))
+                lv.ln.set_style(line.style_dotted)
+                lv.lb.set_text(lv.name + " ✓")
+                lv.lb.set_textcolor(color.new(lv.col, 60))
+            else
+                lv.ln.delete()
+                lv.lb.delete()
+            liq_levels.remove(i)
+
+// =============================================================================
+// 6. KEY LEVELS (SMART MERGING)
 // =============================================================================
 
 var array<line>  a_lines  = array.new<line>()
 var array<label> a_labels = array.new<label>()
 
-method add_or_merge(LevelData[] levels, float p, string n, color c, int t) =>
+method add_or_merge(LevelData[] levels, float p, string n, color c, int t, string st) =>
     bool found = false
     float tol = math.max(syminfo.mintick * 0.5, nz(atr14) * merge_atr)
 
@@ -175,95 +341,200 @@ method add_or_merge(LevelData[] levels, float p, string n, color c, int t) =>
             break
 
     if not found
-        levels.push(LevelData.new(p, n, c, t))
+        levels.push(LevelData.new(p, n, c, t, st))
 
-f_draw_levels() =>
-    if array.size(a_lines) > 0
-        for i = 0 to array.size(a_lines) - 1
-            line.delete(array.get(a_lines, i))
-        array.clear(a_lines)
-    if array.size(a_labels) > 0
-        for i = 0 to array.size(a_labels) - 1
-            label.delete(array.get(a_labels, i))
-        array.clear(a_labels)
-
-    var LevelData[] levels_to_draw = array.new<LevelData>()
-    array.clear(levels_to_draw)
-
+// Added in priority order: when two levels merge, the line stays at the first one's price
+f_build_levels() =>
+    LevelData[] levels = array.new<LevelData>()
     if show_yo and not na(yo_p)
-        levels_to_draw.add_or_merge(yo_p, "YO", c_yo, yo_t)
-    if show_mo and not na(mo_p)
-        levels_to_draw.add_or_merge(mo_p, "MO", c_mo, mo_t)
-    if show_pmo and not na(pmo_p)
-        levels_to_draw.add_or_merge(pmo_p, "PMO", c_pmo, pmo_t)
-    if show_wo and not na(wo_p)
-        levels_to_draw.add_or_merge(wo_p, "WO", c_wo, wo_t)
-    if show_pwo and not na(pwo_p)
-        levels_to_draw.add_or_merge(pwo_p, "PWO", c_pwo, pwo_t)
+        levels.add_or_merge(yo_p, "YO", c_yo, yo_t, line.style_solid)
+    if below_month and show_mo and not na(mo_p)
+        levels.add_or_merge(mo_p, "MO", c_mo, mo_t, line.style_solid)
+    if below_month and show_pmo and not na(pmo_p)
+        levels.add_or_merge(pmo_p, "PMO", c_pmo, pmo_t, line.style_solid)
+    if below_week and show_wo and not na(wo_p)
+        levels.add_or_merge(wo_p, "WO", c_wo, wo_t, line.style_solid)
+    if below_week and show_pwo and not na(pwo_p)
+        levels.add_or_merge(pwo_p, "PWO", c_pwo, pwo_t, line.style_solid)
+    if is_intraday and show_do and not na(do_p)
+        levels.add_or_merge(do_p, "DO", c_do, do_t, line.style_solid)
+    if is_intraday and show_mno and not na(mno_p)
+        levels.add_or_merge(mno_p, "MNO", c_mno, mno_t, line.style_solid)
+    if is_intraday and show_pd and not na(pdh_p)
+        levels.add_or_merge(pdh_p, "PDH", c_pd, pd_t, line.style_dashed)
+        levels.add_or_merge(pdl_p, "PDL", c_pd, pd_t, line.style_dashed)
+    if below_week and show_pw and not na(pwh_p)
+        levels.add_or_merge(pwh_p, "PWH", c_pw, pwo_t, line.style_dashed)
+        levels.add_or_merge(pwl_p, "PWL", c_pw, pwo_t, line.style_dashed)
+    levels
 
-    tf_ms = timeframe.in_seconds("") * 1000
-    future_t = timenow + (tf_ms * lbl_offset)
+f_clear_levels() =>
+    for l in a_lines
+        l.delete()
+    a_lines.clear()
+    for lb in a_labels
+        lb.delete()
+    a_labels.clear()
 
-    for lvl in levels_to_draw
-        l = line.new(x1=lvl.start_time, y1=lvl.price, x2=future_t, y2=lvl.price,
-                     xloc=xloc.bar_time, color=lvl.col, style=line.style_solid)
-        array.push(a_lines, l)
+f_draw_levels(LevelData[] levels) =>
+    future_t = timenow + timeframe.in_seconds() * 1000 * lbl_offset
+    for lvl in levels
+        a_lines.push(line.new(x1=lvl.start_time, y1=lvl.price, x2=future_t, y2=lvl.price,
+                              xloc=xloc.bar_time, color=lvl.col, style=lvl.style))
+        txt = show_price ? lvl.name + "  " + str.tostring(lvl.price, format.mintick) : lvl.name
+        a_labels.push(label.new(x=future_t, y=lvl.price, text=txt,
+                                 xloc=xloc.bar_time, style=label.style_label_left,
+                                 color=color.new(color.black, 100), textcolor=lvl.col,
+                                 size=lbl_size, textalign=text.align_left))
 
-        lb = label.new(x=future_t, y=lvl.price, text=lvl.name,
-                       xloc=xloc.bar_time, style=label.style_label_left,
-                       color=color.new(color.black, 100), textcolor=lvl.col,
-                       size=lbl_size, textalign=text.align_left)
-        array.push(a_labels, lb)
-
+f_level_alerts(LevelData[] levels) =>
+    for lvl in levels
         crossed = (close[1] < lvl.price and close >= lvl.price) or (close[1] > lvl.price and close <= lvl.price)
-        if alert_levels and barstate.isrealtime and crossed
+        if crossed
             alert(syminfo.ticker + ": price crossed " + lvl.name + " @ " + str.tostring(lvl.price, format.mintick), alert.freq_once_per_bar)
 
-if barstate.islast and show_levels
-    f_draw_levels()
-
 // =============================================================================
-// 6. PRICE GAPS
+// 7. PRICE GAPS / FVG
 // =============================================================================
 
 var array<GapData> active_gaps = array.new<GapData>()
-bool is_bull_gap = low > high[1]
-bool is_bear_gap = high < low[1]
+
+f_new_gap(float top, float bottom, int left_t, bool is_bull) =>
+    col = is_bull ? c_gap_up : c_gap_down
+    bx = box.new(left_t, top, time, bottom, xloc=xloc.bar_time, bgcolor=col, border_color=na)
+    mid = (top + bottom) / 2
+    line ce = show_ce ? line.new(left_t, mid, time, mid, xloc=xloc.bar_time, color=color.new(col, 30), style=line.style_dotted) : na
+    active_gaps.push(GapData.new(bx, ce, top, bottom, is_bull))
+    if alert_gaps
+        alert(syminfo.ticker + ": new " + (is_bull ? "bullish" : "bearish") + " gap " + str.tostring(bottom, format.mintick) + " - " + str.tostring(top, format.mintick), alert.freq_once_per_bar_close)
+
+min_gap = nz(atr14) * min_gap_atr
+use_fvg = gap_mode != "Price Gap (2-candle)"
+use_pg  = gap_mode != "FVG (3-candle)"
 
 if show_gaps and time > start_time_limit
-    if is_bull_gap
-        new_box = box.new(left=time[1], top=low, right=time, bottom=high[1],
-                          xloc=xloc.bar_time, bgcolor=c_gap_up, border_color=na)
-        array.push(active_gaps, GapData.new(new_box, high[1], true))
-        if alert_gaps
-            alert(syminfo.ticker + ": new bullish gap " + str.tostring(high[1], format.mintick) + " - " + str.tostring(low, format.mintick), alert.freq_once_per_bar_close)
-
-    if is_bear_gap
-        new_box = box.new(left=time[1], top=low[1], right=time, bottom=high,
-                          xloc=xloc.bar_time, bgcolor=c_gap_down, border_color=na)
-        array.push(active_gaps, GapData.new(new_box, low[1], false))
-        if alert_gaps
-            alert(syminfo.ticker + ": new bearish gap " + str.tostring(high, format.mintick) + " - " + str.tostring(low[1], format.mintick), alert.freq_once_per_bar_close)
+    if use_fvg and low > high[2] and low - high[2] >= min_gap
+        f_new_gap(low, high[2], time[2], true)
+    if use_fvg and high < low[2] and low[2] - high >= min_gap
+        f_new_gap(low[2], high, time[2], false)
+    if use_pg and low > high[1] and low - high[1] >= min_gap
+        f_new_gap(low, high[1], time[1], true)
+    if use_pg and high < low[1] and low[1] - high >= min_gap
+        f_new_gap(low[1], high, time[1], false)
 
     // Drop the oldest gaps beyond the cap so the array (and the loop below) stays bounded
-    while array.size(active_gaps) > max_gaps
-        old_gap = array.shift(active_gaps)
-        box.delete(old_gap.id)
+    while active_gaps.size() > max_gaps
+        old_gap = active_gaps.shift()
+        old_gap.bx.delete()
+        old_gap.ce.delete()
 
-    if array.size(active_gaps) > 0
-        for i = array.size(active_gaps) - 1 to 0
-            gap = array.get(active_gaps, i)
-            bool filled = false
+if show_gaps and active_gaps.size() > 0
+    for i = active_gaps.size() - 1 to 0
+        g = active_gaps.get(i)
+        filled = g.is_bull ? low <= g.bottom : high >= g.top
+        if filled
+            g.bx.delete()
+            g.ce.delete()
+            active_gaps.remove(i)
+        else
+            if shrink_gaps
+                if g.is_bull and low < g.top
+                    g.top := low
+                    g.bx.set_top(low)
+                else if not g.is_bull and high > g.bottom
+                    g.bottom := high
+                    g.bx.set_bottom(high)
+            g.bx.set_right(time)
+            if not na(g.ce)
+                g.ce.set_x2(time)
 
-            if gap.is_bull
-                if low <= gap.level_to_fill
-                    filled := true
-            else
-                if high >= gap.level_to_fill
-                    filled := true
+// =============================================================================
+// 8. OPENING GAPS (NWOG / NDOG)
+// =============================================================================
 
-            if filled
-                box.delete(gap.id)
-                array.remove(active_gaps, i)
-            else
-                box.set_right(gap.id, time)
+var array<OpenGap> nwogs = array.new<OpenGap>()
+var array<OpenGap> ndogs = array.new<OpenGap>()
+
+f_open_gap(OpenGap[] arr, float a, float b, color col, string txt, int keep) =>
+    top = math.max(a, b)
+    bot = math.min(a, b)
+    mid = (top + bot) / 2
+    bx = box.new(time, top, time, bot, xloc=xloc.bar_time, extend=extend.right,
+                 bgcolor=color.new(col, 88), border_color=color.new(col, 60),
+                 text=txt, text_color=color.new(col, 20), text_size=size.tiny,
+                 text_halign=text.align_right, text_valign=text.align_center)
+    ce = line.new(time, mid, time + 1, mid, xloc=xloc.bar_time, extend=extend.right, color=color.new(col, 40), style=line.style_dotted)
+    arr.push(OpenGap.new(bx, ce))
+    while arr.size() > keep
+        old = arr.shift()
+        old.bx.delete()
+        old.ce.delete()
+
+// Skip gaps smaller than a tick: on 24/7 markets the new period opens at the last close
+gap_exists = not na(close[1]) and math.abs(open - close[1]) >= syminfo.mintick
+
+if is_intraday and gap_exists
+    if show_nwog and new_week
+        f_open_gap(nwogs, open, close[1], c_nwog, "NWOG", nwog_count)
+    else if show_ndog and new_day
+        f_open_gap(ndogs, open, close[1], c_ndog, "NDOG", ndog_count)
+
+// =============================================================================
+// 9. DASHBOARD
+// =============================================================================
+
+var table dash = show_dash ? table.new(dash_pos, 2, 7, bgcolor=color.new(#131722, 10), frame_color=color.new(#787b86, 60),
+                                       frame_width=1, border_color=color.new(#787b86, 85), border_width=1) : na
+if barstate.isfirst and show_dash
+    dash.merge_cells(0, 0, 1, 0)
+
+f_active_names(Session[] list) =>
+    string out = ""
+    for s in list
+        if s.in_zone
+            out := out == "" ? s.name : out + " / " + s.name
+    out == "" ? "—" : out
+
+f_dash_row(table t, int row, string k, string v, color vc) =>
+    t.cell(0, row, k, text_color=color.new(#b2b5be, 0), text_size=size.small, text_halign=text.align_left)
+    t.cell(1, row, v, text_color=vc, text_size=size.small, text_halign=text.align_right)
+
+f_draw_dash(LevelData[] levels) =>
+    float above_p = na
+    string above_n = "—"
+    float below_p = na
+    string below_n = "—"
+    for lvl in levels
+        if lvl.price > close and (na(above_p) or lvl.price < above_p)
+            above_p := lvl.price
+            above_n := lvl.name
+        if lvl.price < close and (na(below_p) or lvl.price > below_p)
+            below_p := lvl.price
+            below_n := lvl.name
+
+    above_txt = na(above_p) ? "—" : above_n + "  +" + str.tostring((above_p - close) / close * 100, "#.##") + "%"
+    below_txt = na(below_p) ? "—" : below_n + "  -" + str.tostring((close - below_p) / close * 100, "#.##") + "%"
+    adr_used  = adr5 > 0 ? (day_hi - day_lo) / adr5 * 100 : na
+    adr_col   = na(adr_used) ? color.white : adr_used >= 100 ? color.new(#ff5252, 0) : adr_used >= 75 ? color.new(#ffa726, 0) : color.new(#00bfa5, 0)
+
+    dash.cell(0, 0, "arnoldd KL", text_color=color.white, text_size=size.small, text_halign=text.align_left)
+    f_dash_row(dash, 1, "Session",   f_active_names(array.from(s_asia, s_lon, s_ny, s_pm)), color.white)
+    f_dash_row(dash, 2, "Kill Zone", f_active_names(array.from(s_asia_kz, s_lon_kz, s_ny_kz, s_pm_kz)), color.new(#ffd54f, 0))
+    f_dash_row(dash, 3, "ADR (5D)",  na(adr5) ? "—" : str.tostring(adr5, format.mintick), color.white)
+    f_dash_row(dash, 4, "Today / ADR", na(adr_used) ? "—" : str.tostring(adr_used, "#") + "%", adr_col)
+    f_dash_row(dash, 5, "Next ▲", above_txt, color.new(#00bfa5, 0))
+    f_dash_row(dash, 6, "Next ▼", below_txt, color.new(#ff5252, 0))
+
+// =============================================================================
+// 10. LAST-BAR RENDERING
+// =============================================================================
+
+if barstate.islast
+    levels = f_build_levels()
+    f_clear_levels()
+    if show_levels
+        f_draw_levels(levels)
+    if show_dash
+        f_draw_dash(levels)
+    if alert_levels and barstate.isrealtime
+        f_level_alerts(levels)
