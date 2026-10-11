@@ -1,0 +1,18 @@
+v2.0
+
+Fixed
+- Session timezone now defaults to America/New_York. The default session times are New York times, but they were being read in UTC+3, so sessions were drawn about seven hours early and drifted another hour during US daylight saving. If you changed the timezone or session times yourself, check that the two still match.
+- Levels that sit very close to each other now merge into one line with a combined label (for example "WO / PDH") instead of stacking. The distance is set by "Merge Tolerance (x ATR)"; 0 keeps the old exact-price behaviour.
+- Unfilled gaps are now capped ("Max Active Gaps") so the script stays fast on low timeframes.
+
+New
+- Session liquidity: Asia, London and NY session highs and lows extend right after the session closes and are marked swept when price trades through them.
+- Key levels: Daily Open, NY Midnight Open, Previous Day High/Low, Previous Week High/Low, and an option to show the price in each label.
+- Fair value gaps: the default gap type is now the 3-candle FVG. The original 2-candle price gap is still available, alone or together with FVG. Gaps shrink on partial fill and show their midpoint.
+- New Week and New Day Opening Gaps (NWOG / NDOG) with midpoint.
+- Dashboard with the active session and kill zone, 5-day average daily range, today's range as a share of it, and the nearest level above and below.
+- Alerts for key level cross, session high/low sweep, new gap and kill zone open. Create one alert with "Any alert() function call" and pick the events in the Alerts group.
+
+Changed
+- Levels that carry no information on the current timeframe are hidden, for example the daily open on a daily chart.
+- Each level's colour now sits next to its toggle in the settings.
