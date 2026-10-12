@@ -7,11 +7,11 @@ fair value gaps and opening gaps.
 
 **Published on TradingView:** [Arnoldd's Tool: Key Levels, Gaps & Kill Zones](https://www.tradingview.com/script/DBvnSZIo-Arnoldd-s-Tool-Key-Levels-Gaps-Kill-Zones/)
 
-![Intraday view: sessions, kill zones, fair value gaps and the dashboard on EURUSD 15m](docs/images/intraday-sessions-fvg.png)
+![Intraday view: sessions, kill zones, fair value gaps and the dashboard on EURUSD 15m](docs/images/eurusd-15m-sessions-fvg.png)
 
 *EURUSD 15m: session and kill zone boxes, unfilled fair value gaps with their midpoints, the weekly open, and the dashboard.*
 
-![Higher-timeframe opens on EURUSD daily](docs/images/daily-key-levels.png)
+![Higher-timeframe opens on EURUSD daily](docs/images/eurusd-daily-levels.png)
 
 *EURUSD daily: yearly, monthly and weekly opens with their previous-period counterparts.*
 
